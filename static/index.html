@@ -189,7 +189,7 @@
     <li><a href="#analyze">Analyze</a></li>
     <li><a href="about.html">About Model</a></li>
     <li><a href="disease.html">Skin Diseases</a></li>
-    <li><a href="http://127.0.0.1:8000 " target="_blank" style="color:var(--teal);font-weight:600;">🩺 Dr. Derm Chat</a></li>
+    <li><a href="/chat-ui" target="_blank" style="color:var(--teal);font-weight:600;">🩺 Dr. Derm Chat</a></li>
   </ul>
 </nav>
 
@@ -380,7 +380,7 @@
         <h3>💬 Want to know more about your condition?</h3>
         <p>Chat with Dr. Derm — ask about causes, foods, medications, and daily care</p>
       </div>
-      <a id="chatDermBtn" href="https://dermai-ihth.onrender.com/chat-ui" class="chat-cta-btn" target="_blank">
+      <a id="chatDermBtn" href="/chat-ui" class="chat-cta-btn" target="_blank">
         🩺 &nbsp;Talk to Dr. Derm
       </a>
     </div>
@@ -412,10 +412,8 @@
 </footer>
 
 <script>
-  // Auto-detect: localhost when running locally, Render URL in production
-  const API_BASE = window.location.origin;|| window.location.hostname === 'localhost')
-    ? 'http://127.0.0.1:5000'
-    : 'https://dermai-ihth.onrender.com';
+  // ── API base: empty string = same origin (works on HuggingFace, Render, local) ──
+  const API_BASE = '';
 
   const form       = document.getElementById("analysisForm");
   const uploadZone = document.getElementById("uploadZone");
@@ -436,7 +434,8 @@
   uploadZone.addEventListener("dragover", e => { e.preventDefault(); uploadZone.classList.add("drag-over"); });
   uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("drag-over"));
   uploadZone.addEventListener("drop", e => {
-    e.preventDefault(); uploadZone.classList.remove("drag-over");
+    e.preventDefault();
+    uploadZone.classList.remove("drag-over");
     if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
   });
 
@@ -489,7 +488,7 @@
     submitBtn.classList.add("loading");
 
     try {
-      const res  = await fetch(`${API_BASE}/predict`, { method:"POST", body:formData });
+      const res  = await fetch(`${API_BASE}/predict`, { method: "POST", body: formData });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       renderResult(data, userInfo);
@@ -507,13 +506,13 @@
     const pct = parseFloat(data.confidence);
     document.getElementById("confidence").innerText = pct.toFixed(1) + "%";
     setTimeout(() => { document.getElementById("confidenceFill").style.width = Math.min(pct, 100) + "%"; }, 120);
-    document.getElementById("match_score").innerText    = data.match_score;
+    document.getElementById("match_score").innerText      = data.match_score;
     document.getElementById("symptomsReported").innerText = userInfo.symptoms || "None";
     document.getElementById("matching").innerHTML = renderTags(data.matching, false) || '<span style="color:var(--muted)">None</span>';
     document.getElementById("missing").innerHTML  = renderTags(data.missing,  true)  || '<span style="color:var(--muted)">None</span>';
     renderMedicines(data.medicines || {});
     resultBox.classList.add("visible");
-    setTimeout(() => resultBox.scrollIntoView({ behavior:"smooth", block:"start" }), 150);
+    setTimeout(() => resultBox.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
 
     // Update Dr. Derm chat link with disease context
     const chatBtn = document.getElementById("chatDermBtn");
@@ -524,65 +523,68 @@
 
   function renderTags(arr, isMissing) {
     if (!arr || !arr.length) return "";
-    return arr.map(t => `<span class="tag${isMissing?" missing":""}">${t}</span>`).join("");
+    return arr.map(t => `<span class="tag${isMissing ? " missing" : ""}">${t}</span>`).join("");
   }
 
   function renderMedicines(meds) {
     const cont = document.getElementById("medicines-container");
     cont.innerHTML = "";
     const LABELS = {
-      topical:"Topical Treatment",oral_moderate:"Oral — Moderate",oral_severe:"Oral — Severe",
-      systemic:"Systemic Treatment",first_line:"First-Line Treatment",adjuvants:"Adjuvant Therapy",
-      antipruritic:"Antipruritic",antihistamines:"Antihistamines",emollients:"Emollients",
-      surgical:"Surgical Treatment",immunotherapy:"Immunotherapy",targeted_therapy:"Targeted Therapy",
-      biologics_psoriasis:"Biologic Therapy",systemic_psoriasis:"Systemic (Psoriasis)",
-      topical_psoriasis:"Topical (Psoriasis)",lichen_planus:"Lichen Planus",
-      rosacea_specific:"Rosacea-Specific",vitiligo:"Vitiligo",melasma:"Melasma",
-      photodermatoses:"Photodermatosis",actinic_keratosis:"Actinic Keratosis",
-      basal_cell_carcinoma:"Basal Cell Carcinoma",squamous_cell_carcinoma:"Squamous Cell Carcinoma",
-      impetigo_topical:"Impetigo (Topical)",cellulitis_oral:"Cellulitis (Oral)",
-      severe_iv:"Severe / IV Therapy",scabies_first_line:"Scabies First-Line",
-      scabies_adjuncts:"Scabies Adjuncts",lyme_disease:"Lyme Disease",
-      insect_bites:"Insect Bites",onychomycosis_topical:"Nail Fungus (Topical)",
-      onychomycosis_oral:"Nail Fungus (Oral)",nail_psoriasis:"Nail Psoriasis",
-      tinea_topical:"Tinea (Topical)",tinea_oral:"Tinea (Oral)",candidiasis:"Candidiasis",
-      acute_urticaria:"Acute Urticaria",chronic_urticaria:"Chronic Urticaria",
-      anaphylaxis_emergency:"⚠️ Anaphylaxis Emergency",herpes_simplex:"Herpes Simplex",
-      herpes_zoster:"Herpes Zoster",hpv_warts:"HPV / Warts",
-      androgenetic_alopecia:"Androgenetic Alopecia",alopecia_areata:"Alopecia Areata",
-      telogen_effluvium:"Telogen Effluvium",tinea_capitis:"Tinea Capitis",
-      mild:"Mild Cases",moderate_to_severe:"Moderate–Severe",mild_to_moderate:"Mild to Moderate",
+      topical:"Topical Treatment", oral_moderate:"Oral — Moderate", oral_severe:"Oral — Severe",
+      systemic:"Systemic Treatment", first_line:"First-Line Treatment", adjuvants:"Adjuvant Therapy",
+      antipruritic:"Antipruritic", antihistamines:"Antihistamines", emollients:"Emollients",
+      surgical:"Surgical Treatment", immunotherapy:"Immunotherapy", targeted_therapy:"Targeted Therapy",
+      biologics_psoriasis:"Biologic Therapy", systemic_psoriasis:"Systemic (Psoriasis)",
+      topical_psoriasis:"Topical (Psoriasis)", lichen_planus:"Lichen Planus",
+      rosacea_specific:"Rosacea-Specific", vitiligo:"Vitiligo", melasma:"Melasma",
+      photodermatoses:"Photodermatosis", actinic_keratosis:"Actinic Keratosis",
+      basal_cell_carcinoma:"Basal Cell Carcinoma", squamous_cell_carcinoma:"Squamous Cell Carcinoma",
+      impetigo_topical:"Impetigo (Topical)", cellulitis_oral:"Cellulitis (Oral)",
+      severe_iv:"Severe / IV Therapy", scabies_first_line:"Scabies First-Line",
+      scabies_adjuncts:"Scabies Adjuncts", lyme_disease:"Lyme Disease",
+      insect_bites:"Insect Bites", onychomycosis_topical:"Nail Fungus (Topical)",
+      onychomycosis_oral:"Nail Fungus (Oral)", nail_psoriasis:"Nail Psoriasis",
+      tinea_topical:"Tinea (Topical)", tinea_oral:"Tinea (Oral)", candidiasis:"Candidiasis",
+      acute_urticaria:"Acute Urticaria", chronic_urticaria:"Chronic Urticaria",
+      anaphylaxis_emergency:"⚠️ Anaphylaxis Emergency", herpes_simplex:"Herpes Simplex",
+      herpes_zoster:"Herpes Zoster", hpv_warts:"HPV / Warts",
+      androgenetic_alopecia:"Androgenetic Alopecia", alopecia_areata:"Alopecia Areata",
+      telogen_effluvium:"Telogen Effluvium", tinea_capitis:"Tinea Capitis",
+      mild:"Mild Cases", moderate_to_severe:"Moderate–Severe", mild_to_moderate:"Mild to Moderate",
       sjs_ten_emergency:"⚠️ SJS/TEN Emergency",
       allergic_contact_dermatitis:"Allergic Contact Dermatitis",
-      infantile_hemangioma:"Infantile Hemangioma",pyogenic_granuloma:"Pyogenic Granuloma",
-      port_wine_stain:"Port Wine Stain",cherry_angioma:"Cherry Angioma",
-      cutaneous_small_vessel:"Cutaneous Vasculitis",systemic_vasculitis:"Systemic Vasculitis",
-      cutaneous_lupus:"Cutaneous Lupus",systemic_lupus:"Systemic Lupus",
-      warts:"Warts",molluscum_contagiosum:"Molluscum Contagiosum",
+      infantile_hemangioma:"Infantile Hemangioma", pyogenic_granuloma:"Pyogenic Granuloma",
+      port_wine_stain:"Port Wine Stain", cherry_angioma:"Cherry Angioma",
+      cutaneous_small_vessel:"Cutaneous Vasculitis", systemic_vasculitis:"Systemic Vasculitis",
+      cutaneous_lupus:"Cutaneous Lupus", systemic_lupus:"Systemic Lupus",
+      warts:"Warts", molluscum_contagiosum:"Molluscum Contagiosum",
       viral_skin_infections_general:"General Viral Care",
-      seborrheic_keratosis:"Seborrheic Keratosis",dermatofibroma:"Dermatofibroma",
-      lipoma:"Lipoma",general_approach:"General Approach",diabetes_related:"Diabetes-Related",
-      thyroid_related:"Thyroid-Related",liver_disease:"Liver Disease",
-      bullous_pemphigoid:"Bullous Pemphigoid",wound_care:"Wound Care",
-      topical_steroids:"Topical Steroids",calcineurin_inhibitors:"Calcineurin Inhibitors",
+      seborrheic_keratosis:"Seborrheic Keratosis", dermatofibroma:"Dermatofibroma",
+      lipoma:"Lipoma", general_approach:"General Approach", diabetes_related:"Diabetes-Related",
+      thyroid_related:"Thyroid-Related", liver_disease:"Liver Disease",
+      bullous_pemphigoid:"Bullous Pemphigoid", wound_care:"Wound Care",
+      topical_steroids:"Topical Steroids", calcineurin_inhibitors:"Calcineurin Inhibitors",
       supportive:"Supportive Care"
     };
+
     if (!meds || Object.keys(meds).length === 0) {
       cont.innerHTML = `<div class="med-card full-width"><p style="color:var(--muted)">No medication data available.</p></div>`;
       return;
     }
+
     for (const [key, value] of Object.entries(meds)) {
       if (key === "monitoring" || key === "caution") continue;
-      const label = LABELS[key] || key.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+      const label = LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
       const div = document.createElement("div");
       div.className = "med-card";
       if (Array.isArray(value)) {
-        div.innerHTML = `<div class="med-card-title">💊 ${label}</div><ul>${value.map(v=>`<li>${v}</li>`).join("")}</ul>`;
+        div.innerHTML = `<div class="med-card-title">💊 ${label}</div><ul>${value.map(v => `<li>${v}</li>`).join("")}</ul>`;
       } else {
         div.innerHTML = `<div class="med-card-title">📌 ${label}</div><p>${value}</p>`;
       }
       cont.appendChild(div);
     }
+
     if (meds.monitoring) {
       const m = document.createElement("div");
       m.className = "med-monitoring full-width";
@@ -600,9 +602,9 @@
   function showToast(msg, type) {
     document.querySelectorAll(".toast").forEach(t => t.remove());
     const colors = {
-      success:{ bg:"#f0fdfa", border:"#a7f3d0", color:"#065f46" },
-      warn:   { bg:"#fffbeb", border:"#fde68a", color:"#78350f" },
-      error:  { bg:"#fef2f2", border:"#fecaca", color:"#7f1d1d" }
+      success: { bg:"#f0fdfa", border:"#a7f3d0", color:"#065f46" },
+      warn:    { bg:"#fffbeb", border:"#fde68a", color:"#78350f" },
+      error:   { bg:"#fef2f2", border:"#fecaca", color:"#7f1d1d" }
     };
     const c = colors[type] || colors.success;
     const t = document.createElement("div");
