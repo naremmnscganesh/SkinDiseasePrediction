@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy all project files
 COPY app.py .
 COPY model_architecture.json .
-COPY best_weights.h5 .
+COPY best_weights.weights.h5 .
 COPY static/ ./static/
 
 # HuggingFace Spaces requires port 7860
