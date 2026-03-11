@@ -20,7 +20,7 @@ with open("model_architecture.json", "r") as f:
     model = model_from_json(f.read())
 
 print("Loading model weights...")
-model.load_weights("best_weights.h5")
+model.load_weights("best_weights.weights.h5")
 print("✅ Model loaded successfully")
 
 # ── Class names (23 DermNet classes, alphabetical — Keras order) ──
