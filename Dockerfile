@@ -13,12 +13,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY index.html .
 COPY model_architecture.json .
 COPY best_weights.weights.h5 .
 COPY class_names.json .
 COPY symptoms.json .
 COPY medicines.json .
-COPY static/ ./static/
 
 EXPOSE 7860
 
