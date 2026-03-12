@@ -1,292 +1,451 @@
-import os
-import json
-import numpy as np
 from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
+import tensorflow as tf
+import numpy as np
+import json
+from tensorflow.keras.preprocessing import image
 from PIL import Image
 import io
+import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from datetime import datetime
+from flask_cors import CORS
 
-# ── TensorFlow / Keras ────────────────────────────────────────────
-import tensorflow as tf
-from tensorflow.keras.models import model_from_json
-from tensorflow.keras.applications.efficientnet import preprocess_input
-
-app = Flask(__name__, static_folder="static")
+app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
-# ── Load split model (JSON architecture + H5 weights) ─────────────
-print("Loading model architecture...")
-with open("model_architecture.json", "r") as f:
-    model = model_from_json(f.read())
+# ─────────────────────────────────────────────
+#  Paths  (relative — works on HuggingFace)
+# ─────────────────────────────────────────────
+WEIGHTS_PATH     = "best_weights.h5"
+ARCH_PATH        = "model_architecture.json"
+CLASS_NAMES_PATH = "class_names.json"
+SYMPTOMS_PATH    = "symptoms.json"
+MEDICINES_PATH   = "medicines.json"
+IMG_SIZE         = (224, 224)
+PORT             = 7860
 
-print("Loading model weights...")
-model.load_weights("best_weights.weights.h5")
-print("✅ Model loaded successfully")
+# ─────────────────────────────────────────────
+#  Email Configuration
+# ─────────────────────────────────────────────
+SENDER_EMAIL    = "angrajkarn2004@gmail.com"
+SENDER_PASSWORD = "wpjh gfuv ipma ibyi"
 
-# ── Class names (23 DermNet classes, alphabetical — Keras order) ──
-CLASS_NAMES = [
-    "Acne and Rosacea Photos",
-    "Actinic Keratosis Basal Cell Carcinoma and other Malignant Lesions",
-    "Atopic Dermatitis Photos",
-    "Bullous Disease Photos",
-    "Cellulitis Impetigo and other Bacterial Infections",
-    "Eczema Photos",
-    "Exanthems and Drug Eruptions",
-    "Hair Loss Photos Alopecia and other Hair Diseases",
-    "Herpes HPV and other STDs Photos",
-    "Light Diseases and Disorders of Pigmentation",
-    "Lupus and other Connective Tissue diseases",
-    "Melanoma Skin Cancer Nevi and Moles",
-    "Nail Fungus and other Nail Disease",
-    "Poison Ivy Photos and other Contact Dermatitis",
-    "Psoriasis pictures Lichen Planus and related diseases",
-    "Scabies Lyme Disease and other Infestations and Bites",
-    "Seborrheic Keratoses and other Benign Tumors",
-    "Systemic Disease",
-    "Tinea Ringworm Candidiasis and other Fungal Infections",
-    "Urticaria Hives",
-    "Vascular Tumors",
-    "Vasculitis Photos",
-    "Warts Molluscum and other Viral Infections",
-]
+# ─────────────────────────────────────────────
+#  Load Model & Data
+# ─────────────────────────────────────────────
+print("Loading model architecture from JSON...")
+with open(ARCH_PATH, 'r', encoding='utf-8') as f:
+    model_json = f.read()
+model = tf.keras.models.model_from_json(model_json)
 
-# ── Symptom database ──────────────────────────────────────────────
-DISEASE_SYMPTOMS = {
-    "Acne and Rosacea Photos": ["pimples", "blackheads", "redness", "oily skin", "pustules", "whiteheads", "facial flushing"],
-    "Actinic Keratosis Basal Cell Carcinoma and other Malignant Lesions": ["scaly patch", "rough skin", "bleeding", "non-healing sore", "crusty lesion", "pink growth"],
-    "Atopic Dermatitis Photos": ["itching", "dry skin", "rash", "redness", "inflammation", "flaking", "scaly patches"],
-    "Bullous Disease Photos": ["blisters", "fluid-filled bumps", "skin peeling", "burning", "pain", "raw skin"],
-    "Cellulitis Impetigo and other Bacterial Infections": ["redness", "swelling", "warmth", "pain", "crusting", "oozing", "fever"],
-    "Eczema Photos": ["itching", "dry patches", "redness", "inflammation", "cracking", "oozing", "scaling"],
-    "Exanthems and Drug Eruptions": ["widespread rash", "fever", "itching", "red spots", "hives", "skin peeling"],
-    "Hair Loss Photos Alopecia and other Hair Diseases": ["hair thinning", "bald patches", "hair fall", "scalp irritation", "receding hairline"],
-    "Herpes HPV and other STDs Photos": ["sores", "blisters", "pain", "itching", "burning", "genital lesions", "warts"],
-    "Light Diseases and Disorders of Pigmentation": ["skin discoloration", "white patches", "dark spots", "uneven skin tone", "sun sensitivity"],
-    "Lupus and other Connective Tissue diseases": ["butterfly rash", "joint pain", "fatigue", "sun sensitivity", "hair loss", "mouth sores"],
-    "Melanoma Skin Cancer Nevi and Moles": ["changing mole", "asymmetric lesion", "dark spot", "bleeding mole", "irregular border"],
-    "Nail Fungus and other Nail Disease": ["thickened nails", "yellow nails", "brittle nails", "nail discoloration", "nail separation"],
-    "Poison Ivy Photos and other Contact Dermatitis": ["itching", "redness", "blistering", "swelling", "rash", "burning sensation"],
-    "Psoriasis pictures Lichen Planus and related diseases": ["silver scales", "red plaques", "itching", "dry skin", "joint pain", "thickened skin"],
-    "Scabies Lyme Disease and other Infestations and Bites": ["intense itching", "burrows", "rash", "small bumps", "night itching", "bull's eye rash"],
-    "Seborrheic Keratoses and other Benign Tumors": ["waxy growths", "brown spots", "rough patches", "stuck-on appearance", "painless bumps"],
-    "Systemic Disease": ["skin rash", "fatigue", "joint pain", "fever", "weight loss", "organ involvement"],
-    "Tinea Ringworm Candidiasis and other Fungal Infections": ["ring-shaped rash", "itching", "scaly patches", "redness", "athlete's foot", "nail changes"],
-    "Urticaria Hives": ["hives", "welts", "itching", "swelling", "red bumps", "angioedema"],
-    "Vascular Tumors": ["red growths", "bleeding lesion", "port wine stain", "hemangioma", "vascular birthmark"],
-    "Vasculitis Photos": ["purple spots", "skin ulcers", "redness", "pain", "joint pain", "bruising"],
-    "Warts Molluscum and other Viral Infections": ["warts", "rough bumps", "skin tags", "pearly papules", "painless lumps"],
-}
+print("Loading trained weights...")
+model.load_weights(WEIGHTS_PATH)
 
-# ── Medicine database ─────────────────────────────────────────────
-MEDICINES = {
-    "Acne and Rosacea Photos": {
-        "topical": ["Benzoyl Peroxide 2.5–5%", "Tretinoin 0.025–0.1%", "Clindamycin gel 1%", "Azelaic Acid 15–20%"],
-        "oral_moderate": ["Doxycycline 100 mg/day", "Minocycline 50–100 mg/day"],
-        "rosacea_specific": ["Metronidazole 0.75% gel", "Ivermectin 1% cream", "Brimonidine 0.33% gel"],
-        "caution": "Avoid prolonged antibiotic use. Use non-comedogenic sunscreen daily.",
-    },
-    "Actinic Keratosis Basal Cell Carcinoma and other Malignant Lesions": {
-        "actinic_keratosis": ["Fluorouracil 5% cream", "Imiquimod 5% cream", "Diclofenac 3% gel"],
-        "basal_cell_carcinoma": ["Mohs micrographic surgery", "Vismodegib (advanced cases)", "Radiation therapy"],
-        "monitoring": "Regular dermatology follow-up every 3–6 months. Full-body skin exams.",
-        "caution": "Urgent dermatology referral required for malignant lesions.",
-    },
-    "Atopic Dermatitis Photos": {
-        "topical_steroids": ["Hydrocortisone 1–2.5% (mild)", "Triamcinolone 0.1% (moderate)", "Clobetasol 0.05% (severe)"],
-        "calcineurin_inhibitors": ["Tacrolimus 0.03–0.1% ointment", "Pimecrolimus 1% cream"],
-        "oral_moderate": ["Dupilumab (Dupixent) 300 mg biweekly", "Cyclosporine 3–5 mg/kg/day"],
-        "emollients": ["CeraVe Moisturizing Cream", "Eucerin Original", "Vaseline Petroleum Jelly"],
-        "caution": "Avoid known triggers (wool, soaps, stress). Bathe in lukewarm water.",
-    },
-    "Bullous Disease Photos": {
-        "first_line": ["Prednisone 0.5–1 mg/kg/day", "Dapsone 50–100 mg/day"],
-        "immunotherapy": ["Rituximab 1000 mg IV (x2)", "Mycophenolate mofetil 1–3 g/day", "Azathioprine 1–3 mg/kg/day"],
-        "wound_care": ["Non-adhesive dressings", "Silver sulfadiazine for open areas", "Saline wound irrigation"],
-        "caution": "Specialist dermatology/immunology management essential.",
-    },
-    "Cellulitis Impetigo and other Bacterial Infections": {
-        "impetigo_topical": ["Mupirocin 2% ointment 3×/day", "Retapamulin 1% ointment"],
-        "cellulitis_oral": ["Cephalexin 500 mg 4×/day × 5–7 days", "Amoxicillin-clavulanate 875 mg 2×/day"],
-        "severe_iv": ["Vancomycin IV (MRSA)", "Piperacillin-tazobactam IV", "Clindamycin 600 mg IV q8h"],
-        "caution": "Mark cellulitis border with pen to monitor spread. Seek ER if fever develops.",
-    },
-    "Eczema Photos": {
-        "topical_steroids": ["Hydrocortisone 1% (face/folds)", "Betamethasone 0.1% (body)", "Clobetasol 0.05% (palms/soles)"],
-        "calcineurin_inhibitors": ["Tacrolimus 0.03% ointment", "Pimecrolimus 1% cream"],
-        "oral_moderate": ["Dupilumab (Dupixent)", "Cetirizine 10 mg (antipruritic)"],
-        "emollients": ["Apply within 3 min of bathing", "CeraVe Healing Ointment", "Aquaphor Healing Ointment"],
-        "caution": "Avoid scratching. Use fragrance-free laundry detergent.",
-    },
-    "Exanthems and Drug Eruptions": {
-        "mild_to_moderate": ["Antihistamines: Cetirizine 10 mg", "Topical steroids: Hydrocortisone 1%"],
-        "moderate_to_severe": ["Prednisone 0.5–1 mg/kg/day × 5–7 days", "Methylprednisolone IV (severe)"],
-        "sjs_ten_emergency": ["Stop causative drug immediately", "IV fluids and electrolytes", "IVIG 1 g/kg/day × 3 days", "Urgent burns unit transfer"],
-        "caution": "Identify and permanently avoid the causative drug.",
-    },
-    "Hair Loss Photos Alopecia and other Hair Diseases": {
-        "androgenetic_alopecia": ["Minoxidil 5% solution/foam topically", "Finasteride 1 mg/day (males)", "Dutasteride 0.5 mg/day"],
-        "alopecia_areata": ["Intralesional triamcinolone 5–10 mg/mL", "Baricitinib 4 mg/day (JAK inhibitor)", "Topical anthralin"],
-        "tinea_capitis": ["Griseofulvin 10–20 mg/kg/day × 6–8 weeks", "Terbinafine 250 mg/day × 4 weeks"],
-        "monitoring": "Check thyroid, iron, vitamin D, and ferritin levels.",
-    },
-    "Herpes HPV and other STDs Photos": {
-        "herpes_simplex": ["Acyclovir 400 mg 3×/day × 7–10 days", "Valacyclovir 1 g 2×/day × 7–10 days"],
-        "herpes_zoster": ["Valacyclovir 1 g 3×/day × 7 days", "Famciclovir 500 mg 3×/day"],
-        "hpv_warts": ["Podophyllotoxin 0.5% solution", "Imiquimod 5% cream 3×/week", "Cryotherapy (liquid nitrogen)"],
-        "caution": "Notify sexual partners. Practice safe sex. HPV vaccine recommended.",
-    },
-    "Light Diseases and Disorders of Pigmentation": {
-        "vitiligo": ["Tacrolimus 0.1% ointment", "Narrowband UVB phototherapy", "Ruxolitinib 1.5% cream (Opzelura)"],
-        "melasma": ["Hydroquinone 4% cream", "Tretinoin 0.05% + Hydroquinone combo", "Tranexamic acid 250 mg 2×/day"],
-        "photodermatoses": ["Sunscreen SPF 50+ (broad spectrum)", "Hydroxychloroquine 200 mg/day", "Beta-carotene supplements"],
-        "caution": "Strict sun avoidance and daily SPF 50+ sunscreen is essential.",
-    },
-    "Lupus and other Connective Tissue diseases": {
-        "cutaneous_lupus": ["Hydroxychloroquine 200–400 mg/day", "Topical tacrolimus 0.1%", "Sunscreen SPF 50+ daily"],
-        "systemic_lupus": ["Prednisone 0.5–1 mg/kg/day", "Methotrexate 7.5–25 mg/week", "Belimumab (Benlysta) IV/SC"],
-        "monitoring": "Regular CBC, CMP, urinalysis, and complement levels (C3, C4).",
-        "caution": "Strict sun avoidance. Rheumatology co-management required.",
-    },
-    "Melanoma Skin Cancer Nevi and Moles": {
-        "surgical": ["Wide local excision (primary treatment)", "Sentinel lymph node biopsy"],
-        "targeted_therapy": ["Dabrafenib + Trametinib (BRAF V600E+)", "Vemurafenib (BRAF mutated)"],
-        "immunotherapy": ["Pembrolizumab (Keytruda)", "Nivolumab (Opdivo)", "Ipilimumab (Yervoy)"],
-        "monitoring": "Urgent biopsy for any suspicious lesion. Oncology referral required.",
-        "caution": "Do NOT delay evaluation of suspicious moles. Melanoma is life-threatening.",
-    },
-    "Nail Fungus and other Nail Disease": {
-        "onychomycosis_topical": ["Ciclopirox 8% nail lacquer", "Efinaconazole 10% solution", "Tavaborole 5% solution"],
-        "onychomycosis_oral": ["Terbinafine 250 mg/day × 12 weeks (fingernails) or 16 weeks (toenails)", "Itraconazole pulse therapy 200 mg 2×/day × 1 week/month"],
-        "nail_psoriasis": ["Calcipotriol + betamethasone gel", "Intralesional triamcinolone"],
-        "monitoring": "Liver function tests before and during oral antifungal therapy.",
-    },
-    "Poison Ivy Photos and other Contact Dermatitis": {
-        "mild": ["Hydrocortisone 1–2.5% cream", "Calamine lotion", "Oatmeal baths"],
-        "moderate_to_severe": ["Prednisone 40–60 mg/day × 5–7 days (tapering)", "Triamcinolone ointment 0.1%"],
-        "antipruritic": ["Diphenhydramine (Benadryl) 25–50 mg at night", "Cetirizine 10 mg/day", "Cool wet compresses"],
-        "allergic_contact_dermatitis": ["Identify and strictly avoid allergen", "Patch testing by dermatologist"],
-        "caution": "Wash exposed skin with soap within 10 min of contact to reduce severity.",
-    },
-    "Psoriasis pictures Lichen Planus and related diseases": {
-        "topical_psoriasis": ["Calcipotriol (Dovonex) 0.005%", "Betamethasone dipropionate 0.05%", "Tazarotene 0.05–0.1% gel"],
-        "systemic_psoriasis": ["Methotrexate 7.5–25 mg/week", "Acitretin 25–50 mg/day", "Cyclosporine 2.5–5 mg/kg/day"],
-        "biologics_psoriasis": ["Secukinumab (Cosentyx) 300 mg SC", "Adalimumab (Humira)", "Ixekizumab (Taltz)"],
-        "lichen_planus": ["Topical betamethasone 0.05%", "Hydroxychloroquine 200–400 mg/day"],
-        "caution": "Monitor for psoriatic arthritis. Regular liver/kidney checks on systemic therapy.",
-    },
-    "Scabies Lyme Disease and other Infestations and Bites": {
-        "scabies_first_line": ["Permethrin 5% cream (full body, leave 8–14 hours)", "Ivermectin 200 mcg/kg oral (×2, one week apart)"],
-        "scabies_adjuncts": ["Antihistamines for itch", "Topical corticosteroids for post-scabies itch"],
-        "lyme_disease": ["Doxycycline 100 mg 2×/day × 10–21 days", "Amoxicillin 500 mg 3×/day (children/pregnant)"],
-        "insect_bites": ["Hydrocortisone 1% cream", "Oral antihistamines", "Cold packs"],
-        "caution": "Treat all household contacts simultaneously for scabies.",
-    },
-    "Seborrheic Keratoses and other Benign Tumors": {
-        "seborrheic_keratosis": ["Cryotherapy (liquid nitrogen)", "Curettage", "Hydrogen peroxide 40% solution (Eskata)"],
-        "dermatofibroma": ["Observation (usually benign)", "Cryotherapy", "Surgical excision if bothersome"],
-        "lipoma": ["Observation if asymptomatic", "Surgical excision", "Liposuction (large lipomas)"],
-        "caution": "Biopsy any lesion with atypical features to rule out malignancy.",
-    },
-    "Systemic Disease": {
-        "general_approach": ["Treat the underlying systemic disease", "Dermatology + internal medicine co-management"],
-        "diabetes_related": ["Glycemic control (HbA1c target <7%)", "Wound care", "Antifungals for candidal infections"],
-        "thyroid_related": ["Thyroid hormone replacement/suppression", "Symptom-directed skin care"],
-        "liver_disease": ["Ursodeoxycholic acid (cholestatic itch)", "Cholestyramine", "Antihistamines"],
-        "monitoring": "Regular organ function monitoring. Address the root systemic condition.",
-    },
-    "Tinea Ringworm Candidiasis and other Fungal Infections": {
-        "tinea_topical": ["Clotrimazole 1% cream 2×/day × 2–4 weeks", "Terbinafine 1% cream × 1–2 weeks", "Miconazole 2% cream"],
-        "tinea_oral": ["Terbinafine 250 mg/day × 2–4 weeks", "Itraconazole 200 mg/day × 2 weeks"],
-        "candidiasis": ["Nystatin cream/powder", "Fluconazole 150 mg single dose (oral/vaginal)", "Clotrimazole pessary"],
-        "monitoring": "Liver function tests with prolonged oral antifungal therapy.",
-    },
-    "Urticaria Hives": {
-        "acute_urticaria": ["Cetirizine 10–20 mg/day", "Loratadine 10 mg/day", "Fexofenadine 180 mg/day"],
-        "chronic_urticaria": ["Non-sedating antihistamines (double dose)", "Omalizumab (Xolair) 300 mg SC monthly"],
-        "anaphylaxis_emergency": ["Epinephrine auto-injector (EpiPen) 0.3 mg IM immediately", "Call emergency services", "IV methylprednisolone 125 mg"],
-        "caution": "Identify and avoid triggers. Carry EpiPen if risk of anaphylaxis.",
-    },
-    "Vascular Tumors": {
-        "infantile_hemangioma": ["Propranolol 1–3 mg/kg/day (first-line)", "Timolol 0.5% topical drops"],
-        "pyogenic_granuloma": ["Cauterization", "Laser (PDL)", "Surgical excision"],
-        "port_wine_stain": ["Pulsed dye laser (PDL) — multiple sessions"],
-        "cherry_angioma": ["Electrodesiccation", "Laser ablation (usually cosmetic)"],
-        "caution": "Specialist vascular dermatology/surgery referral for complex vascular tumors.",
-    },
-    "Vasculitis Photos": {
-        "cutaneous_small_vessel": ["Colchicine 0.6 mg 2×/day", "Dapsone 50–100 mg/day", "Prednisone 0.5 mg/kg/day"],
-        "systemic_vasculitis": ["High-dose prednisone 1 mg/kg/day", "Cyclophosphamide IV", "Rituximab IV"],
-        "monitoring": "CBC, CMP, ANCA, complement levels, urinalysis regularly.",
-        "caution": "Immediate rheumatology evaluation required. Organ involvement is life-threatening.",
-    },
-    "Warts Molluscum and other Viral Infections": {
-        "warts": ["Salicylic acid 17–40% (daily application)", "Cryotherapy (liquid nitrogen) every 2–3 weeks", "Imiquimod 5% cream"],
-        "molluscum_contagiosum": ["Cantharidin solution (applied by physician)", "Cryotherapy", "Potassium hydroxide 10% solution"],
-        "viral_skin_infections_general": ["Supportive care", "Keep area clean and dry", "Avoid picking/spreading"],
-        "caution": "Warts are contagious. Avoid sharing towels/personal items.",
-    },
-}
+with open(CLASS_NAMES_PATH, 'r', encoding='utf-8') as f:
+    class_names = json.load(f)
 
-# ── Symptom matcher ────────────────────────────────────────────────
-def match_symptoms(user_symptoms_text, disease):
-    user_syms = [s.strip().lower() for s in user_symptoms_text.replace(",", " ").split()]
-    known_syms = DISEASE_SYMPTOMS.get(disease, [])
-    matching = [s for s in known_syms if any(u in s.lower() or s.lower() in u for u in user_syms)]
-    missing  = [s for s in known_syms if s not in matching][:4]
-    total    = len(known_syms) if known_syms else 1
-    score    = f"{len(matching)}/{total} symptoms matched"
-    return matching, missing, score
+with open(SYMPTOMS_PATH, 'r', encoding='utf-8') as f:
+    DISEASE_SYMPTOMS = json.load(f)
 
-# ── Predict endpoint ───────────────────────────────────────────────
-@app.route("/predict", methods=["POST"])
+with open(MEDICINES_PATH, 'r', encoding='utf-8') as f:
+    MEDICINES_DB = json.load(f)
+
+print(f"Model and data loaded! {len(class_names)} classes ready.")
+
+
+# ─────────────────────────────────────────────
+#  Image Preprocessing  (identical to local backend)
+# ─────────────────────────────────────────────
+def preprocess_image(img_bytes):
+    img = Image.open(io.BytesIO(img_bytes)).convert('RGB').resize(IMG_SIZE)
+    img_array = image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = (img_array / 127.5) - 1.0      # ← exact same as local backend
+    return img_array
+
+
+# ─────────────────────────────────────────────
+#  Medicine Lookup
+# ─────────────────────────────────────────────
+def get_medicine_info(disease_name):
+    return MEDICINES_DB.get(disease_name, {})
+
+
+# ─────────────────────────────────────────────
+#  Medicine HTML Block (for email)
+# ─────────────────────────────────────────────
+def build_medicine_html_block(meds):
+    if not meds:
+        return "<p style='color:#6b7280;'>No specific medication data available.</p>"
+
+    SECTION_LABELS = {
+        "topical": "Topical Treatment", "oral_moderate": "Oral Treatment (Moderate)",
+        "oral_severe": "Oral Treatment (Severe)", "systemic": "Systemic Treatment",
+        "first_line": "First-Line Treatment", "adjuvants": "Adjuvant Therapy",
+        "antipruritic": "Antipruritic (Itch Relief)", "antihistamines": "Antihistamines",
+        "emollients": "Emollients / Moisturizers", "surgical": "Surgical Treatment",
+        "immunotherapy": "Immunotherapy", "targeted_therapy": "Targeted Therapy",
+        "biologics_psoriasis": "Biologic Therapy", "systemic_psoriasis": "Systemic (Psoriasis)",
+        "topical_psoriasis": "Topical (Psoriasis)", "lichen_planus": "Lichen Planus Treatment",
+        "rosacea_specific": "Rosacea-Specific", "vitiligo": "Vitiligo Treatment",
+        "melasma": "Melasma Treatment", "photodermatoses": "Photodermatosis Treatment",
+        "actinic_keratosis": "Actinic Keratosis", "basal_cell_carcinoma": "Basal Cell Carcinoma",
+        "squamous_cell_carcinoma": "Squamous Cell Carcinoma",
+        "impetigo_topical": "Impetigo (Topical)", "cellulitis_oral": "Cellulitis (Oral)",
+        "severe_iv": "Severe / IV Therapy", "scabies_first_line": "Scabies First-Line",
+        "scabies_adjuncts": "Scabies Adjuncts", "lyme_disease": "Lyme Disease",
+        "insect_bites": "Insect Bite Relief", "onychomycosis_topical": "Nail Fungus (Topical)",
+        "onychomycosis_oral": "Nail Fungus (Oral)", "nail_psoriasis": "Nail Psoriasis",
+        "tinea_topical": "Tinea (Topical)", "tinea_oral": "Tinea (Oral)",
+        "candidiasis": "Candidiasis", "acute_urticaria": "Acute Urticaria",
+        "chronic_urticaria": "Chronic Urticaria", "anaphylaxis_emergency": "Anaphylaxis Emergency",
+        "herpes_simplex": "Herpes Simplex", "herpes_zoster": "Herpes Zoster",
+        "hpv_warts": "HPV / Warts", "androgenetic_alopecia": "Androgenetic Alopecia",
+        "alopecia_areata": "Alopecia Areata", "telogen_effluvium": "Telogen Effluvium",
+        "tinea_capitis": "Tinea Capitis", "mild": "Mild Cases",
+        "moderate_to_severe": "Moderate-Severe Cases",
+        "allergic_contact_dermatitis": "Allergic Contact Dermatitis",
+        "mild_to_moderate": "Mild to Moderate", "sjs_ten_emergency": "SJS / TEN Emergency",
+        "infantile_hemangioma": "Infantile Hemangioma", "pyogenic_granuloma": "Pyogenic Granuloma",
+        "port_wine_stain": "Port Wine Stain", "cherry_angioma": "Cherry Angioma",
+        "cutaneous_small_vessel": "Cutaneous Vasculitis", "systemic_vasculitis": "Systemic Vasculitis",
+        "cutaneous_lupus": "Cutaneous Lupus", "systemic_lupus": "Systemic Lupus (SLE)",
+        "warts": "Warts Treatment", "molluscum_contagiosum": "Molluscum Contagiosum",
+        "viral_skin_infections_general": "General Viral Care",
+        "seborrheic_keratosis": "Seborrheic Keratosis", "dermatofibroma": "Dermatofibroma",
+        "lipoma": "Lipoma", "general_approach": "General Approach",
+        "diabetes_related": "Diabetes-Related Skin", "thyroid_related": "Thyroid-Related Skin",
+        "liver_disease": "Liver Disease Skin", "bullous_pemphigoid": "Bullous Pemphigoid",
+        "wound_care": "Wound / Erosion Care", "topical_steroids": "Topical Steroids",
+        "calcineurin_inhibitors": "Calcineurin Inhibitors", "supportive": "Supportive Care",
+    }
+
+    SKIP_KEYS = {"monitoring", "caution"}
+    html = ""
+
+    for key, value in meds.items():
+        if key in SKIP_KEYS:
+            continue
+        label = SECTION_LABELS.get(key, key.replace("_", " ").title())
+        if isinstance(value, list):
+            items = "".join(f"<li style='margin-bottom:4px;'>{item}</li>" for item in value)
+            html += f"""
+            <div style="margin-bottom:16px; padding:12px 16px; background:#f9fafb;
+                        border-radius:6px; border-left:3px solid #0d9488;">
+              <div style="font-size:12px; font-weight:700; color:#0d9488;
+                          text-transform:uppercase; letter-spacing:1px;
+                          margin-bottom:8px;">💊 {label}</div>
+              <ul style="margin:0; padding-left:18px; color:#374151;
+                         font-size:14px; line-height:1.8;">{items}</ul>
+            </div>"""
+        elif isinstance(value, str):
+            html += f"""
+            <div style="margin-bottom:12px; padding:10px 16px; background:#f9fafb;
+                        border-radius:6px; border-left:3px solid #0d9488;">
+              <div style="font-size:12px; font-weight:700; color:#0d9488;
+                          text-transform:uppercase; letter-spacing:1px;
+                          margin-bottom:4px;">📌 {label}</div>
+              <p style="margin:0; color:#374151; font-size:14px;">{value}</p>
+            </div>"""
+
+    if meds.get("monitoring"):
+        html += f"""
+        <div style="background:#f0f9ff; border-left:4px solid #0ea5e9;
+                    padding:12px 16px; border-radius:4px; margin-top:10px; font-size:13px; color:#0c4a6e;">
+          <strong>📊 Monitoring:</strong> {meds['monitoring']}
+        </div>"""
+
+    if meds.get("caution"):
+        html += f"""
+        <div style="background:#fff7ed; border-left:4px solid #f59e0b;
+                    padding:12px 16px; border-radius:4px; margin-top:10px; font-size:13px; color:#92400e;">
+          <strong>⚠️ Caution:</strong> {meds['caution']}
+        </div>"""
+
+    return html
+
+
+def build_medicine_plain_block(meds):
+    if not meds:
+        return "  No specific medication data available.\n"
+    SKIP_KEYS = {"monitoring", "caution"}
+    text = ""
+    for key, value in meds.items():
+        if key in SKIP_KEYS:
+            continue
+        label = key.replace("_", " ").upper()
+        if isinstance(value, list):
+            text += f"\n  [{label}]\n" + "".join(f"    - {item}\n" for item in value)
+        elif isinstance(value, str):
+            text += f"\n  [{label}]\n    {value}\n"
+    if meds.get("monitoring"):
+        text += f"\n  [MONITORING]\n    {meds['monitoring']}\n"
+    if meds.get("caution"):
+        text += f"\n  [CAUTION]\n    {meds['caution']}\n"
+    return text
+
+
+# ─────────────────────────────────────────────
+#  Email Builders
+# ─────────────────────────────────────────────
+def build_email_html(name, age, email, phone, symptoms_text,
+                     disease, confidence, match_score, matching, missing, meds):
+    report_date  = datetime.now().strftime("%B %d, %Y  %H:%M")
+    matching_str = ", ".join(matching) if matching else "None"
+    missing_str  = ", ".join(missing)  if missing  else "None"
+    medicine_block = build_medicine_html_block(meds)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body      {{ font-family:'Segoe UI',Arial,sans-serif; background:#f4f4f4; margin:0; padding:0; }}
+    .wrapper  {{ max-width:700px; margin:30px auto; background:#fff; border-radius:10px;
+                 box-shadow:0 4px 18px rgba(0,0,0,0.10); overflow:hidden; }}
+    .header   {{ background:#0d9488; padding:28px 36px; color:#fff; }}
+    .header h1 {{ font-size:24px; margin:0 0 4px; letter-spacing:1px; }}
+    .header p  {{ margin:0; font-size:13px; opacity:0.85; }}
+    .info-bar  {{ background:#f0fdfa; padding:16px 36px; border-bottom:1px solid #ccf0ec;
+                  display:flex; gap:40px; flex-wrap:wrap; }}
+    .info-bar span {{ font-size:13px; color:#374151; }}
+    .info-bar strong {{ color:#0d9488; }}
+    .body     {{ padding:28px 36px; }}
+    .sec      {{ font-size:13px; font-weight:700; text-transform:uppercase;
+                 letter-spacing:1.2px; color:#0d9488; margin:24px 0 12px;
+                 border-bottom:1px solid #e5f4f3; padding-bottom:4px; }}
+    table     {{ width:100%; border-collapse:collapse; font-size:15px; }}
+    td        {{ padding:9px 6px; vertical-align:top; }}
+    td.lbl    {{ width:45%; color:#6b7280; font-weight:500; }}
+    td.val    {{ color:#111827; font-weight:600; }}
+    tr:nth-child(even) td {{ background:#f9fafb; }}
+    .disclaimer {{ background:#fff7ed; border-left:4px solid #f59e0b; padding:12px 16px;
+                   border-radius:4px; font-size:13px; color:#92400e; margin-top:20px; }}
+    .footer   {{ background:#f0fdfa; padding:18px 36px; font-size:12px; color:#6b7280;
+                 border-top:1px solid #ccf0ec; text-align:center; }}
+    .footer strong {{ color:#0d9488; }}
+  </style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <h1>🩺 DermAI — Skin Condition Report</h1>
+    <p>Generated on {report_date}</p>
+  </div>
+  <div class="info-bar">
+    <span><strong>Patient:</strong> {name}</span>
+    <span><strong>Age:</strong> {age}</span>
+    <span><strong>Email:</strong> {email}</span>
+    {"<span><strong>Phone:</strong> " + phone + "</span>" if phone else ""}
+  </div>
+  <div class="body">
+    <p style="font-size:15px; color:#374151; margin-top:0;">
+      Dear <strong>{name}</strong>,<br><br>
+      Thank you for using <strong>DermAI Skin Condition Analyzer</strong>.
+      Below is your personalized analysis report based on the image and symptoms provided.
+    </p>
+    <div class="sec">📋 Analysis Summary</div>
+    <table>
+      <tr><td class="lbl">Predicted Condition</td><td class="val">{disease}</td></tr>
+      <tr><td class="lbl">Confidence Level</td><td class="val">{confidence}%</td></tr>
+      <tr><td class="lbl">Symptom Alignment</td><td class="val">{match_score}</td></tr>
+      <tr><td class="lbl">Symptoms You Reported</td><td class="val">{symptoms_text or "None"}</td></tr>
+      <tr><td class="lbl">Matching Symptoms</td><td class="val">{matching_str}</td></tr>
+      <tr><td class="lbl">Additional Notes</td><td class="val" style="color:#6b7280;font-weight:400;">{missing_str}</td></tr>
+    </table>
+    <div class="sec">💊 Recommended Medications & Treatment Protocol</div>
+    <p style="font-size:13px;color:#6b7280;margin-top:-8px;margin-bottom:14px;">
+      Based on standard clinical guidelines for the predicted condition.
+      These are <em>reference guidelines only</em> — always follow your dermatologist's prescription.
+    </p>
+    {medicine_block}
+    <div class="sec">🛡️ General Skin Care Tips</div>
+    <ul style="padding-left:20px; color:#374151; font-size:14px; line-height:2.0;">
+      <li>Keep the affected area clean and dry at all times.</li>
+      <li>Avoid scratching, rubbing, or picking at the skin.</li>
+      <li>Use gentle, fragrance-free moisturizers if dryness is present.</li>
+      <li>Apply broad-spectrum SPF 30+ sunscreen every morning.</li>
+      <li>Consult a licensed dermatologist for a confirmed diagnosis and personalized treatment.</li>
+    </ul>
+    <div class="disclaimer">
+      ⚠️ <strong>Disclaimer:</strong> This report is for <em>informational purposes only</em>.
+      Do <strong>NOT</strong> self-medicate. Always consult a qualified healthcare professional.
+    </div>
+  </div>
+  <div class="footer">
+    <strong>DermAI</strong> — Skin Condition Analyzer | For educational use only<br>
+    This is an automated report. Please do not reply to this email.
+  </div>
+</div>
+</body>
+</html>"""
+
+
+def build_email_plain(name, age, symptoms_text,
+                      disease, confidence, match_score, matching, missing, meds):
+    report_date  = datetime.now().strftime("%B %d, %Y %H:%M")
+    matching_str = ", ".join(matching) if matching else "None"
+    missing_str  = ", ".join(missing)  if missing  else "None"
+    medicine_text = build_medicine_plain_block(meds)
+    return f"""
+============================================================
+        DermAI — Skin Condition Report
+        Generated: {report_date}
+============================================================
+
+Dear {name},
+
+PATIENT DETAILS
+  Name  : {name}
+  Age   : {age}
+
+ANALYSIS SUMMARY
+  Predicted Condition    : {disease}
+  Confidence Level       : {confidence}%
+  Symptom Alignment      : {match_score}
+  Symptoms You Reported  : {symptoms_text or "None"}
+  Matching Symptoms      : {matching_str}
+  Additional Notes       : {missing_str}
+
+RECOMMENDED MEDICATIONS & TREATMENT PROTOCOL
+{medicine_text}
+
+GENERAL SKIN CARE TIPS
+  - Keep the affected area clean and dry.
+  - Avoid scratching or rubbing the skin.
+  - Use gentle, fragrance-free moisturizers if dryness is present.
+  - Apply SPF 30+ sunscreen daily.
+  - Consult a licensed dermatologist for a confirmed diagnosis.
+
+------------------------------------------------------------
+DISCLAIMER: This report is for informational purposes only
+and does NOT constitute a personal prescription.
+Do NOT self-medicate. Consult a qualified healthcare professional.
+------------------------------------------------------------
+
+DermAI — Skin Condition Analyzer | For educational use only
+"""
+
+
+# ─────────────────────────────────────────────
+#  Send Email
+# ─────────────────────────────────────────────
+def send_report_email(recipient_email, recipient_name, age, phone, symptoms_text,
+                      disease, confidence, match_score, matching, missing, meds):
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"DermAI Report — {disease}"
+        msg["From"]    = f"DermAI <{SENDER_EMAIL}>"
+        msg["To"]      = recipient_email
+
+        plain = build_email_plain(recipient_name, age, symptoms_text,
+                                  disease, confidence, match_score, matching, missing, meds)
+        html  = build_email_html(recipient_name, age, recipient_email, phone, symptoms_text,
+                                 disease, confidence, match_score, matching, missing, meds)
+
+        msg.attach(MIMEText(plain, "plain"))
+        msg.attach(MIMEText(html,  "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
+
+        print(f"Email sent to {recipient_email}")
+        return True
+    except Exception as e:
+        print(f"Email failed: {e}")
+        return False
+
+
+# ─────────────────────────────────────────────
+#  Routes
+# ─────────────────────────────────────────────
+@app.route('/')
+def serve_index():
+    return send_from_directory('.', 'index.html')
+
+
+@app.route('/predict', methods=['POST'])
 def predict():
     try:
-        if "file" not in request.files:
-            return jsonify({"error": "No image file provided"}), 400
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
 
-        file      = request.files["file"]
-        user_info = json.loads(request.form.get("user_info", "{}"))
-        symptoms  = user_info.get("symptoms", "")
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
 
-        # Preprocess image
-        img = Image.open(io.BytesIO(file.read())).convert("RGB")
-        img = img.resize((224, 224))
-        img_array = np.array(img, dtype=np.float32)
-        img_array = np.expand_dims(img_array, axis=0)
-        img_array = preprocess_input(img_array)
+        user_info = {}
+        if 'user_info' in request.form:
+            try:
+                user_info = json.loads(request.form['user_info'])
+            except Exception:
+                pass
+
+        user_name     = user_info.get("name", "Patient")
+        user_age      = user_info.get("age", "N/A")
+        user_email    = user_info.get("email", "")
+        user_phone    = user_info.get("phone", "")
+        symptoms_text = user_info.get("symptoms", "")
+        user_symptoms = [s.strip() for s in symptoms_text.replace(",", " ").split() if s.strip()]
 
         # Predict
-        predictions   = model.predict(img_array, verbose=0)
-        pred_index    = int(np.argmax(predictions[0]))
-        confidence    = float(predictions[0][pred_index]) * 100
-        disease       = CLASS_NAMES[pred_index]
+        img_bytes     = file.read()
+        processed_img = preprocess_image(img_bytes)
+        predictions   = model.predict(processed_img)[0]
 
-        # Symptom match
-        matching, missing, match_score = match_symptoms(symptoms, disease)
+        top_idx           = int(np.argmax(predictions))
+        confidence        = float(predictions[top_idx] * 100)
+        predicted_disease = class_names[top_idx]   # ← loaded from class_names.json
+
+        # Symptom matching
+        known_symptoms = DISEASE_SYMPTOMS.get(predicted_disease, [])
+        matching = [s for s in user_symptoms if any(s.lower() == k.lower() for k in known_symptoms)]
+        missing  = [k for k in known_symptoms if not any(k.lower() == u.lower() for u in user_symptoms)]
+        match_score = (
+            f"{len(matching)} of {len(known_symptoms)} typical symptoms match"
+            if known_symptoms else "No symptom data available"
+        )
+
+        confidence_str = f"{confidence:.2f}"
+        meds = get_medicine_info(predicted_disease)
+
+        email_sent = False
+        if user_email:
+            email_sent = send_report_email(
+                recipient_email = user_email,
+                recipient_name  = user_name,
+                age             = user_age,
+                phone           = user_phone,
+                symptoms_text   = symptoms_text,
+                disease         = predicted_disease,
+                confidence      = confidence_str,
+                match_score     = match_score,
+                matching        = matching,
+                missing         = missing,
+                meds            = meds
+            )
 
         return jsonify({
-            "disease":    disease,
-            "confidence": round(confidence, 2),
+            "disease":     predicted_disease,
+            "confidence":  confidence_str,
             "match_score": match_score,
-            "matching":   matching,
-            "missing":    missing,
-            "medicines":  MEDICINES.get(disease, {}),
+            "matching":    matching,
+            "missing":     missing,
+            "medicines":   meds,
+            "email_sent":  email_sent
         })
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print("Error:", e)
+        return jsonify({"error": "Prediction failed"}), 500
 
 
-# ── Serve frontend ─────────────────────────────────────────────────
-@app.route("/")
-def index():
-    return send_from_directory("static", "index.html")
-
-@app.route("/chat-ui")
-def chat_ui():
-    return "<h2>Dr. Derm Chat — coming soon</h2>"
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 7860))   # HuggingFace uses 7860
-    app.run(host="0.0.0.0", port=port)
+# ─────────────────────────────────────────────
+#  Entry Point
+# ─────────────────────────────────────────────
+if __name__ == '__main__':
+    print(f"\nDermAI server starting on port {PORT}\n")
+    app.run(host='0.0.0.0', port=PORT, debug=False)
