@@ -18,7 +18,7 @@ CORS(app)
 # ─────────────────────────────────────────────
 #  Paths  (relative — works on HuggingFace)
 # ─────────────────────────────────────────────
-WEIGHTS_PATH     = "best_weights.h5"
+WEIGHTS_PATH     = "best_weights.weights.h5"
 ARCH_PATH        = "model_architecture.json"
 CLASS_NAMES_PATH = "class_names.json"
 SYMPTOMS_PATH    = "symptoms.json"
