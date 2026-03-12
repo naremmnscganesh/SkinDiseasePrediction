@@ -12,19 +12,28 @@ from email.mime.text import MIMEText
 from datetime import datetime
 from flask_cors import CORS
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+# ─────────────────────────────────────────────
+#  Absolute base directory — fixes all path issues
+# ─────────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ─────────────────────────────────────────────
+#  Flask — static folder is /app/static/
+# ─────────────────────────────────────────────
+app = Flask(__name__,
+            static_folder=os.path.join(BASE_DIR, 'static'),
+            static_url_path='')
 CORS(app)
 
 # ─────────────────────────────────────────────
-#  Paths  (relative — works on HuggingFace)
+#  All file paths use BASE_DIR
 # ─────────────────────────────────────────────
-WEIGHTS_PATH     = "best_weights.weights.h5"
-ARCH_PATH        = "model_architecture.json"
-CLASS_NAMES_PATH = "class_names.json"
-SYMPTOMS_PATH    = "symptoms.json"
-MEDICINES_PATH   = "medicines.json"
+WEIGHTS_PATH     = os.path.join(BASE_DIR, "best_weights.weights.h5")
+ARCH_PATH        = os.path.join(BASE_DIR, "model_architecture.json")
+CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
+SYMPTOMS_PATH    = os.path.join(BASE_DIR, "symptoms.json")
+MEDICINES_PATH   = os.path.join(BASE_DIR, "medicines.json")
 IMG_SIZE         = (224, 224)
-PORT             = 7860
 
 # ─────────────────────────────────────────────
 #  Email Configuration
@@ -35,7 +44,7 @@ SENDER_PASSWORD = "wpjh gfuv ipma ibyi"
 # ─────────────────────────────────────────────
 #  Load Model & Data
 # ─────────────────────────────────────────────
-print("Loading model architecture from JSON...")
+print("Loading model architecture...")
 with open(ARCH_PATH, 'r', encoding='utf-8') as f:
     model_json = f.read()
 model = tf.keras.models.model_from_json(model_json)
@@ -52,30 +61,27 @@ with open(SYMPTOMS_PATH, 'r', encoding='utf-8') as f:
 with open(MEDICINES_PATH, 'r', encoding='utf-8') as f:
     MEDICINES_DB = json.load(f)
 
-print(f"Model and data loaded! {len(class_names)} classes ready.")
+print(f"✅ Model loaded! {len(class_names)} classes ready.")
 
 
 # ─────────────────────────────────────────────
-#  Image Preprocessing  (identical to local backend)
+#  Image Preprocessing
 # ─────────────────────────────────────────────
 def preprocess_image(img_bytes):
     img = Image.open(io.BytesIO(img_bytes)).convert('RGB').resize(IMG_SIZE)
     img_array = image.img_to_array(img)
     img_array = np.expand_dims(img_array, axis=0)
-    img_array = (img_array / 127.5) - 1.0      # ← exact same as local backend
+    img_array = (img_array / 127.5) - 1.0
     return img_array
 
 
 # ─────────────────────────────────────────────
-#  Medicine Lookup
+#  Medicine Helpers
 # ─────────────────────────────────────────────
 def get_medicine_info(disease_name):
     return MEDICINES_DB.get(disease_name, {})
 
 
-# ─────────────────────────────────────────────
-#  Medicine HTML Block (for email)
-# ─────────────────────────────────────────────
 def build_medicine_html_block(meds):
     if not meds:
         return "<p style='color:#6b7280;'>No specific medication data available.</p>"
@@ -132,35 +138,35 @@ def build_medicine_html_block(meds):
         if isinstance(value, list):
             items = "".join(f"<li style='margin-bottom:4px;'>{item}</li>" for item in value)
             html += f"""
-            <div style="margin-bottom:16px; padding:12px 16px; background:#f9fafb;
-                        border-radius:6px; border-left:3px solid #0d9488;">
-              <div style="font-size:12px; font-weight:700; color:#0d9488;
-                          text-transform:uppercase; letter-spacing:1px;
+            <div style="margin-bottom:16px;padding:12px 16px;background:#f9fafb;
+                        border-radius:6px;border-left:3px solid #0d9488;">
+              <div style="font-size:12px;font-weight:700;color:#0d9488;
+                          text-transform:uppercase;letter-spacing:1px;
                           margin-bottom:8px;">💊 {label}</div>
-              <ul style="margin:0; padding-left:18px; color:#374151;
-                         font-size:14px; line-height:1.8;">{items}</ul>
+              <ul style="margin:0;padding-left:18px;color:#374151;
+                         font-size:14px;line-height:1.8;">{items}</ul>
             </div>"""
         elif isinstance(value, str):
             html += f"""
-            <div style="margin-bottom:12px; padding:10px 16px; background:#f9fafb;
-                        border-radius:6px; border-left:3px solid #0d9488;">
-              <div style="font-size:12px; font-weight:700; color:#0d9488;
-                          text-transform:uppercase; letter-spacing:1px;
+            <div style="margin-bottom:12px;padding:10px 16px;background:#f9fafb;
+                        border-radius:6px;border-left:3px solid #0d9488;">
+              <div style="font-size:12px;font-weight:700;color:#0d9488;
+                          text-transform:uppercase;letter-spacing:1px;
                           margin-bottom:4px;">📌 {label}</div>
-              <p style="margin:0; color:#374151; font-size:14px;">{value}</p>
+              <p style="margin:0;color:#374151;font-size:14px;">{value}</p>
             </div>"""
 
     if meds.get("monitoring"):
         html += f"""
-        <div style="background:#f0f9ff; border-left:4px solid #0ea5e9;
-                    padding:12px 16px; border-radius:4px; margin-top:10px; font-size:13px; color:#0c4a6e;">
+        <div style="background:#f0f9ff;border-left:4px solid #0ea5e9;
+                    padding:12px 16px;border-radius:4px;margin-top:10px;font-size:13px;color:#0c4a6e;">
           <strong>📊 Monitoring:</strong> {meds['monitoring']}
         </div>"""
 
     if meds.get("caution"):
         html += f"""
-        <div style="background:#fff7ed; border-left:4px solid #f59e0b;
-                    padding:12px 16px; border-radius:4px; margin-top:10px; font-size:13px; color:#92400e;">
+        <div style="background:#fff7ed;border-left:4px solid #f59e0b;
+                    padding:12px 16px;border-radius:4px;margin-top:10px;font-size:13px;color:#92400e;">
           <strong>⚠️ Caution:</strong> {meds['caution']}
         </div>"""
 
@@ -199,34 +205,32 @@ def build_email_html(name, age, email, phone, symptoms_text,
 
     return f"""<!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body      {{ font-family:'Segoe UI',Arial,sans-serif; background:#f4f4f4; margin:0; padding:0; }}
-    .wrapper  {{ max-width:700px; margin:30px auto; background:#fff; border-radius:10px;
-                 box-shadow:0 4px 18px rgba(0,0,0,0.10); overflow:hidden; }}
-    .header   {{ background:#0d9488; padding:28px 36px; color:#fff; }}
-    .header h1 {{ font-size:24px; margin:0 0 4px; letter-spacing:1px; }}
-    .header p  {{ margin:0; font-size:13px; opacity:0.85; }}
-    .info-bar  {{ background:#f0fdfa; padding:16px 36px; border-bottom:1px solid #ccf0ec;
-                  display:flex; gap:40px; flex-wrap:wrap; }}
-    .info-bar span {{ font-size:13px; color:#374151; }}
-    .info-bar strong {{ color:#0d9488; }}
-    .body     {{ padding:28px 36px; }}
-    .sec      {{ font-size:13px; font-weight:700; text-transform:uppercase;
-                 letter-spacing:1.2px; color:#0d9488; margin:24px 0 12px;
-                 border-bottom:1px solid #e5f4f3; padding-bottom:4px; }}
-    table     {{ width:100%; border-collapse:collapse; font-size:15px; }}
-    td        {{ padding:9px 6px; vertical-align:top; }}
-    td.lbl    {{ width:45%; color:#6b7280; font-weight:500; }}
-    td.val    {{ color:#111827; font-weight:600; }}
-    tr:nth-child(even) td {{ background:#f9fafb; }}
-    .disclaimer {{ background:#fff7ed; border-left:4px solid #f59e0b; padding:12px 16px;
-                   border-radius:4px; font-size:13px; color:#92400e; margin-top:20px; }}
-    .footer   {{ background:#f0fdfa; padding:18px 36px; font-size:12px; color:#6b7280;
-                 border-top:1px solid #ccf0ec; text-align:center; }}
-    .footer strong {{ color:#0d9488; }}
-  </style>
+<head><meta charset="UTF-8">
+<style>
+  body{{ font-family:'Segoe UI',Arial,sans-serif;background:#f4f4f4;margin:0;padding:0; }}
+  .wrapper{{ max-width:700px;margin:30px auto;background:#fff;border-radius:10px;
+             box-shadow:0 4px 18px rgba(0,0,0,0.10);overflow:hidden; }}
+  .header{{ background:#0d9488;padding:28px 36px;color:#fff; }}
+  .header h1{{ font-size:24px;margin:0 0 4px;letter-spacing:1px; }}
+  .header p{{ margin:0;font-size:13px;opacity:0.85; }}
+  .info-bar{{ background:#f0fdfa;padding:16px 36px;border-bottom:1px solid #ccf0ec;
+              display:flex;gap:40px;flex-wrap:wrap; }}
+  .info-bar span{{ font-size:13px;color:#374151; }}
+  .info-bar strong{{ color:#0d9488; }}
+  .body{{ padding:28px 36px; }}
+  .sec{{ font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;
+         color:#0d9488;margin:24px 0 12px;border-bottom:1px solid #e5f4f3;padding-bottom:4px; }}
+  table{{ width:100%;border-collapse:collapse;font-size:15px; }}
+  td{{ padding:9px 6px;vertical-align:top; }}
+  td.lbl{{ width:45%;color:#6b7280;font-weight:500; }}
+  td.val{{ color:#111827;font-weight:600; }}
+  tr:nth-child(even) td{{ background:#f9fafb; }}
+  .disclaimer{{ background:#fff7ed;border-left:4px solid #f59e0b;padding:12px 16px;
+                border-radius:4px;font-size:13px;color:#92400e;margin-top:20px; }}
+  .footer{{ background:#f0fdfa;padding:18px 36px;font-size:12px;color:#6b7280;
+            border-top:1px solid #ccf0ec;text-align:center; }}
+  .footer strong{{ color:#0d9488; }}
+</style>
 </head>
 <body>
 <div class="wrapper">
@@ -241,10 +245,10 @@ def build_email_html(name, age, email, phone, symptoms_text,
     {"<span><strong>Phone:</strong> " + phone + "</span>" if phone else ""}
   </div>
   <div class="body">
-    <p style="font-size:15px; color:#374151; margin-top:0;">
+    <p style="font-size:15px;color:#374151;margin-top:0;">
       Dear <strong>{name}</strong>,<br><br>
       Thank you for using <strong>DermAI Skin Condition Analyzer</strong>.
-      Below is your personalized analysis report based on the image and symptoms provided.
+      Below is your personalized analysis report.
     </p>
     <div class="sec">📋 Analysis Summary</div>
     <table>
@@ -257,30 +261,28 @@ def build_email_html(name, age, email, phone, symptoms_text,
     </table>
     <div class="sec">💊 Recommended Medications & Treatment Protocol</div>
     <p style="font-size:13px;color:#6b7280;margin-top:-8px;margin-bottom:14px;">
-      Based on standard clinical guidelines for the predicted condition.
-      These are <em>reference guidelines only</em> — always follow your dermatologist's prescription.
+      Reference guidelines only — always follow your dermatologist's prescription.
     </p>
     {medicine_block}
     <div class="sec">🛡️ General Skin Care Tips</div>
-    <ul style="padding-left:20px; color:#374151; font-size:14px; line-height:2.0;">
+    <ul style="padding-left:20px;color:#374151;font-size:14px;line-height:2.0;">
       <li>Keep the affected area clean and dry at all times.</li>
       <li>Avoid scratching, rubbing, or picking at the skin.</li>
       <li>Use gentle, fragrance-free moisturizers if dryness is present.</li>
       <li>Apply broad-spectrum SPF 30+ sunscreen every morning.</li>
-      <li>Consult a licensed dermatologist for a confirmed diagnosis and personalized treatment.</li>
+      <li>Consult a licensed dermatologist for a confirmed diagnosis.</li>
     </ul>
     <div class="disclaimer">
-      ⚠️ <strong>Disclaimer:</strong> This report is for <em>informational purposes only</em>.
+      ⚠️ <strong>Disclaimer:</strong> This report is for informational purposes only.
       Do <strong>NOT</strong> self-medicate. Always consult a qualified healthcare professional.
     </div>
   </div>
   <div class="footer">
-    <strong>DermAI</strong> — Skin Condition Analyzer | For educational use only<br>
+    <strong>DermAI</strong> — For educational use only<br>
     This is an automated report. Please do not reply to this email.
   </div>
 </div>
-</body>
-</html>"""
+</body></html>"""
 
 
 def build_email_plain(name, age, symptoms_text,
@@ -320,12 +322,9 @@ GENERAL SKIN CARE TIPS
   - Consult a licensed dermatologist for a confirmed diagnosis.
 
 ------------------------------------------------------------
-DISCLAIMER: This report is for informational purposes only
-and does NOT constitute a personal prescription.
-Do NOT self-medicate. Consult a qualified healthcare professional.
+DISCLAIMER: For informational purposes only. Do NOT self-medicate.
 ------------------------------------------------------------
-
-DermAI — Skin Condition Analyzer | For educational use only
+DermAI — For educational use only
 """
 
 
@@ -352,10 +351,10 @@ def send_report_email(recipient_email, recipient_name, age, phone, symptoms_text
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
 
-        print(f"Email sent to {recipient_email}")
+        print(f"✅ Email sent to {recipient_email}")
         return True
     except Exception as e:
-        print(f"Email failed: {e}")
+        print(f"❌ Email failed: {e}")
         return False
 
 
@@ -364,8 +363,11 @@ def send_report_email(recipient_email, recipient_name, age, phone, symptoms_text
 # ─────────────────────────────────────────────
 @app.route('/')
 def serve_index():
-    return send_from_directory('.', 'index.html')
+    return send_from_directory(os.path.join(BASE_DIR, 'static'), 'index.html')
 
+@app.route('/<path:filename>')
+def serve_static(filename):
+    return send_from_directory(os.path.join(BASE_DIR, 'static'), filename)
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -398,7 +400,7 @@ def predict():
 
         top_idx           = int(np.argmax(predictions))
         confidence        = float(predictions[top_idx] * 100)
-        predicted_disease = class_names[top_idx]   # ← loaded from class_names.json
+        predicted_disease = class_names[top_idx]
 
         # Symptom matching
         known_symptoms = DISEASE_SYMPTOMS.get(predicted_disease, [])
@@ -439,7 +441,7 @@ def predict():
         })
 
     except Exception as e:
-        print("Error:", e)
+        print("❌ Error:", e)
         return jsonify({"error": "Prediction failed"}), 500
 
 
@@ -447,5 +449,4 @@ def predict():
 #  Entry Point
 # ─────────────────────────────────────────────
 if __name__ == '__main__':
-    print(f"\nDermAI server starting on port {PORT}\n")
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+    app.run(host='0.0.0.0', port=7860, debug=False)
