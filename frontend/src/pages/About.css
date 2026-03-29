@@ -1,0 +1,23 @@
+.about-page h2 {
+  font-size: 28px;
+  margin: 40px 0 20px;
+  color: var(--ink);
+  font-family: 'Syne', sans-serif;
+  letter-spacing: -0.5px;
+}
+
+.about-page p {
+  font-size: 17px;
+  color: var(--ink-soft);
+  margin-bottom: 20px;
+}
+
+.about-page ul {
+  margin: 20px 0;
+  padding-left: 30px;
+}
+
+.about-page li {
+  margin-bottom: 12px;
+  color: var(--ink-soft);
+}

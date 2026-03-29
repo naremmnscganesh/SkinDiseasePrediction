@@ -1,0 +1,51 @@
+.diseases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 50px;
+}
+
+.disease-section {
+  background: var(--surface);
+  padding: 30px;
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+  transition: transform 0.2s;
+}
+
+.disease-section:hover {
+  transform: translateY(-2px);
+}
+
+.disease-section h2 {
+  font-family: 'Syne', sans-serif;
+  font-size: 26px;
+  color: var(--teal);
+  margin-bottom: 15px;
+  letter-spacing: -0.5px;
+}
+
+.disease-section p {
+  font-size: 17px;
+  color: var(--ink-soft);
+  margin-bottom: 15px;
+  line-height: 1.6;
+}
+
+.disease-image-container {
+  text-align: center;
+  margin: 20px 0;
+}
+
+.disease-image-container img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.disease-image-caption {
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 8px;
+}
